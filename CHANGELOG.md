@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- Added up to 30 configurable retries for transient provider SSE errors that
+  arrive before the first response event, with progressive delays and
+  `Retry-After` support.
+- Clear the dashboard's last error after a retry successfully starts a response.
+- Added sanitized provider error details and separate provider retry counters.
+- Updated the extension UI with Fiello branding.
+
 ## 0.2.0
 
 - Added a configurable upstream HTTPS endpoint.

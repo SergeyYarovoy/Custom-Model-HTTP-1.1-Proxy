@@ -3,13 +3,18 @@ const https = require("node:https");
 const vscode = require("vscode");
 const {
   buildUpstreamRequestOptions,
+  createSseEventObserver,
   forwardHeaders,
+  isTransientProviderError,
   normalizeUpstreamUrl,
+  providerRetryDelayMs,
+  summarizeProviderError,
 } = require("./proxy-core");
 
 const CONFIGURATION_SECTION = "customModelHttp1Proxy";
 const LISTEN_HOST = "127.0.0.1";
 const LISTEN_PORT = 43129;
+const MAX_PROVIDER_RETRIES = 30;
 const SERVICE_NAME = "vscode-custom-model-http1-proxy";
 
 let server;
@@ -23,9 +28,17 @@ let startedAt = null;
 let requests = 0;
 let activeRequests = 0;
 let upstreamErrors = 0;
+let providerErrors = 0;
+let providerRetries = 0;
 
 function configuration() {
   return vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
+}
+
+function maxProviderRetries() {
+  const configuredValue = configuration().get("maxProviderRetries", 5);
+  const retries = Number(configuredValue);
+  return Number.isInteger(retries) ? Math.min(Math.max(retries, 0), MAX_PROVIDER_RETRIES) : 5;
 }
 
 function loadUpstreamUrl() {
@@ -65,6 +78,9 @@ function localStatus() {
     requests,
     activeRequests,
     upstreamErrors,
+    providerErrors,
+    providerRetries,
+    maxProviderRetries: maxProviderRetries(),
     lastError,
   };
 }
@@ -90,31 +106,20 @@ function createProxyServer() {
     activeRequests += 1;
     updateUi();
 
-    const upstreamRequest = https.request(
-      buildUpstreamRequestOptions(upstreamUrl, request),
-      (upstreamResponse) => {
-        upstreamResponse.once("end", finishRequest);
-        upstreamResponse.once("close", finishRequest);
-        response.writeHead(
-          upstreamResponse.statusCode ?? 502,
-          upstreamResponse.statusMessage,
-          forwardHeaders(upstreamResponse.headers),
-        );
-        upstreamResponse.pipe(response);
-      },
-    );
-
     let finished = false;
+    let activeUpstreamRequest;
+    let retryTimer;
     function finishRequest() {
       if (finished) {
         return;
       }
       finished = true;
+      clearTimeout(retryTimer);
       activeRequests = Math.max(0, activeRequests - 1);
       updateUi();
     }
 
-    upstreamRequest.on("error", (error) => {
+    function failRequest(error) {
       upstreamErrors += 1;
       lastError = error.message;
       finishRequest();
@@ -123,13 +128,140 @@ function createProxyServer() {
       } else {
         response.destroy(error);
       }
-    });
+    }
+
+    function writeResponseHead(upstreamResponse) {
+      response.writeHead(
+        upstreamResponse.statusCode ?? 502,
+        upstreamResponse.statusMessage,
+        forwardHeaders(upstreamResponse.headers),
+      );
+    }
+
+    function forwardSseResponse(upstreamResponse, attempt) {
+      const bufferedChunks = [];
+      let firstEventSeen = false;
+      let forwarding = false;
+      let retrying = false;
+      let responseEnded = false;
+
+      function writeChunk(chunk) {
+        if (!response.write(chunk)) {
+          upstreamResponse.pause();
+          response.once("drain", () => upstreamResponse.resume());
+        }
+      }
+
+      function startForwarding() {
+        if (forwarding) {
+          return;
+        }
+        forwarding = true;
+        writeResponseHead(upstreamResponse);
+        for (const chunk of bufferedChunks.splice(0)) {
+          writeChunk(chunk);
+        }
+      }
+
+      const observer = createSseEventObserver((event) => {
+        if (!firstEventSeen) {
+          firstEventSeen = true;
+          const retryLimit = maxProviderRetries();
+          if (event.event === "error" && attempt < retryLimit && isTransientProviderError(event.data)) {
+            const retryNumber = attempt + 1;
+            const retryDelay = providerRetryDelayMs(retryNumber, upstreamResponse.headers);
+            providerErrors += 1;
+            providerRetries += 1;
+            lastError = `${summarizeProviderError(event.data, upstreamResponse.headers)}; retry ${retryNumber}/${retryLimit} in ${(retryDelay / 1_000).toFixed(1)} s`;
+            retrying = true;
+            updateUi();
+            upstreamResponse.resume();
+            retryTimer = setTimeout(() => {
+              retryTimer = undefined;
+              sendAttempt(retryNumber);
+            }, retryDelay);
+            return;
+          }
+          if (attempt > 0 && event.event !== "error") {
+            lastError = null;
+            updateUi();
+          }
+          startForwarding();
+        }
+        if (event.event === "error") {
+          providerErrors += 1;
+          lastError = summarizeProviderError(event.data, upstreamResponse.headers);
+          updateUi();
+        }
+      });
+
+      upstreamResponse.on("data", (chunk) => {
+        if (retrying) {
+          return;
+        }
+        if (forwarding) {
+          writeChunk(chunk);
+        } else {
+          bufferedChunks.push(chunk);
+        }
+        observer.write(chunk);
+      });
+      upstreamResponse.once("end", () => {
+        responseEnded = true;
+        observer.end();
+        if (retrying) {
+          return;
+        }
+        startForwarding();
+        response.end();
+        finishRequest();
+      });
+      upstreamResponse.once("error", (error) => {
+        if (!retrying) {
+          failRequest(error);
+        }
+      });
+      upstreamResponse.once("close", () => {
+        if (!retrying && !responseEnded) {
+          failRequest(new Error("Upstream response closed before completion"));
+        }
+      });
+    }
+
+    function sendAttempt(attempt) {
+      if (finished) {
+        return;
+      }
+      activeUpstreamRequest = https.request(
+        buildUpstreamRequestOptions(upstreamUrl, request),
+        (upstreamResponse) => {
+          const contentType = String(upstreamResponse.headers["content-type"] ?? "");
+          if (contentType.toLowerCase().startsWith("text/event-stream")) {
+            forwardSseResponse(upstreamResponse, attempt);
+            return;
+          }
+          if (attempt > 0 && (upstreamResponse.statusCode ?? 500) < 400) {
+            lastError = null;
+            updateUi();
+          }
+          writeResponseHead(upstreamResponse);
+          upstreamResponse.once("end", finishRequest);
+          upstreamResponse.once("close", finishRequest);
+          upstreamResponse.pipe(response);
+        },
+      );
+      activeUpstreamRequest.once("error", failRequest);
+      activeUpstreamRequest.end(Buffer.concat(requestChunks));
+    }
+
+    const requestChunks = [];
+    request.on("data", (chunk) => requestChunks.push(chunk));
+    request.once("end", () => sendAttempt(0));
 
     request.on("aborted", () => {
-      upstreamRequest.destroy();
+      activeUpstreamRequest?.destroy();
       finishRequest();
     });
-    request.pipe(upstreamRequest);
   });
 }
 
@@ -233,16 +365,16 @@ async function updateUi() {
 
   const status = await getStatus();
   if (status.mode === "running" || status.mode === "shared") {
-    statusBar.text = "$(radio-tower) HTTP/1.1 Proxy";
+    statusBar.text = "$(radio-tower) Fiello HTTP/1.1 Proxy";
     statusBar.backgroundColor = undefined;
   } else if (status.mode === "starting") {
-    statusBar.text = "$(loading~spin) HTTP/1.1 Proxy";
+    statusBar.text = "$(loading~spin) Fiello HTTP/1.1 Proxy";
     statusBar.backgroundColor = undefined;
   } else {
-    statusBar.text = "$(warning) HTTP/1.1 Proxy";
+    statusBar.text = "$(warning) Fiello HTTP/1.1 Proxy";
     statusBar.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
   }
-  statusBar.tooltip = `Custom Model HTTP/1.1 Proxy: ${status.mode}`;
+  statusBar.tooltip = `Fiello custom Model HTTP/1.1 Proxy: ${status.mode}`;
   statusPanel?.webview.postMessage({ type: "status", status });
 }
 
@@ -253,9 +385,18 @@ async function saveUpstreamUrl(value) {
   await updateUi();
 }
 
+async function saveMaxProviderRetries(value) {
+  const retries = Number(value);
+  if (!Number.isInteger(retries) || retries < 0 || retries > MAX_PROVIDER_RETRIES) {
+    throw new Error(`Provider retries must be a whole number from 0 to ${MAX_PROVIDER_RETRIES}`);
+  }
+  await configuration().update("maxProviderRetries", retries, vscode.ConfigurationTarget.Global);
+  await updateUi();
+}
+
 async function configureUpstream() {
   const value = await vscode.window.showInputBox({
-    title: "Custom Model HTTP/1.1 Proxy",
+    title: "Fiello custom Model HTTP/1.1 Proxy",
     prompt: "Enter the full upstream HTTPS endpoint URL",
     value: upstreamUrl?.href ?? configuration().get("upstreamUrl", ""),
     ignoreFocusOut: true,
@@ -281,7 +422,7 @@ function webviewHtml() {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-  <title>Custom Model HTTP/1.1 Proxy</title>
+  <title>Fiello custom Model HTTP/1.1 Proxy</title>
   <style nonce="${nonce}">
     body { padding: 24px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
     main { max-width: 760px; margin: 0 auto; }
@@ -296,8 +437,9 @@ function webviewHtml() {
     .indicator { width: 10px; height: 10px; border-radius: 50%; background: var(--vscode-testing-iconQueued); }
     .indicator.running, .indicator.shared { background: var(--vscode-testing-iconPassed); }
     .indicator.error, .indicator.blocked, .indicator.notConfigured { background: var(--vscode-testing-iconFailed); }
-    .configuration { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 24px; }
-    label { grid-column: 1 / -1; color: var(--vscode-descriptionForeground); }
+    .configuration { display: grid; grid-template-columns: minmax(0, 1fr) 160px auto; align-items: end; gap: 8px; margin-bottom: 24px; }
+    .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    label { color: var(--vscode-descriptionForeground); }
     input { min-width: 0; padding: 7px 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
     input:focus { outline: 1px solid var(--vscode-focusBorder); }
     dl { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(220px, 3fr); margin: 0; border-top: 1px solid var(--vscode-panel-border); }
@@ -311,13 +453,19 @@ function webviewHtml() {
 <body>
   <main>
     <header>
-      <h1>Custom Model HTTP/1.1 Proxy</h1>
+      <h1>Fiello custom Model HTTP/1.1 Proxy</h1>
       <div class="actions"><button id="settings" class="secondary" type="button">Settings</button><button id="restart" type="button">Restart</button></div>
     </header>
     <div class="summary"><span id="indicator" class="indicator"></span><strong id="mode">Starting</strong></div>
     <div class="configuration">
-      <label for="upstream">Upstream HTTPS endpoint</label>
-      <input id="upstream" type="url" spellcheck="false" placeholder="https://models.example.com/v1/responses">
+      <div class="field">
+        <label for="upstream">Upstream HTTPS endpoint</label>
+        <input id="upstream" type="url" spellcheck="false" placeholder="https://models.example.com/v1/responses">
+      </div>
+      <div class="field">
+        <label for="maxProviderRetries">Maximum retries</label>
+        <input id="maxProviderRetries" type="number" min="0" max="30" step="1">
+      </div>
       <button id="save" type="button">Save</button>
     </div>
     <dl>
@@ -326,7 +474,10 @@ function webviewHtml() {
       <dt>Uptime</dt><dd id="uptime">-</dd>
       <dt>Requests</dt><dd id="requests">0</dd>
       <dt>Active</dt><dd id="activeRequests">0</dd>
-      <dt>Upstream errors</dt><dd id="upstreamErrors">0</dd>
+      <dt>Transport errors</dt><dd id="upstreamErrors">0</dd>
+      <dt>Provider errors</dt><dd id="providerErrors">0</dd>
+      <dt>Provider retries</dt><dd id="providerRetries">0</dd>
+      <dt>Max retries per request</dt><dd id="configuredRetries">0</dd>
       <dt>Last error</dt><dd id="lastError">None</dd>
     </dl>
   </main>
@@ -336,7 +487,11 @@ function webviewHtml() {
     let initialized = false;
     byId('restart').addEventListener('click', () => vscode.postMessage({ type: 'restart' }));
     byId('settings').addEventListener('click', () => vscode.postMessage({ type: 'settings' }));
-    byId('save').addEventListener('click', () => vscode.postMessage({ type: 'save', value: byId('upstream').value }));
+    byId('save').addEventListener('click', () => vscode.postMessage({
+      type: 'save',
+      upstream: byId('upstream').value,
+      maxProviderRetries: byId('maxProviderRetries').value,
+    }));
     window.addEventListener('message', ({ data }) => {
       if (data.type !== 'status') return;
       const status = data.status;
@@ -348,10 +503,14 @@ function webviewHtml() {
       byId('requests').textContent = status.requests;
       byId('activeRequests').textContent = status.activeRequests;
       byId('upstreamErrors').textContent = status.upstreamErrors;
+      byId('providerErrors').textContent = status.providerErrors;
+      byId('providerRetries').textContent = status.providerRetries;
+      byId('configuredRetries').textContent = status.maxProviderRetries;
       byId('lastError').textContent = status.lastError || 'None';
       byId('lastError').className = status.lastError ? 'error' : '';
       if (!initialized) {
         byId('upstream').value = status.upstream || '';
+        byId('maxProviderRetries').value = status.maxProviderRetries;
         initialized = true;
       }
     });
@@ -370,7 +529,7 @@ function showStatus(context) {
 
   statusPanel = vscode.window.createWebviewPanel(
     "customModelHttp1ProxyStatus",
-    "Custom Model HTTP/1.1 Proxy",
+    "Fiello custom Model HTTP/1.1 Proxy",
     vscode.ViewColumn.One,
     { enableScripts: true },
   );
@@ -380,7 +539,8 @@ function showStatus(context) {
       if (message.type === "restart") {
         await restartProxy();
       } else if (message.type === "save") {
-        await saveUpstreamUrl(message.value);
+        await saveUpstreamUrl(message.upstream);
+        await saveMaxProviderRetries(message.maxProviderRetries);
       } else if (message.type === "settings") {
         await vscode.commands.executeCommand(
           "workbench.action.openSettings",
@@ -411,7 +571,10 @@ async function activate(context) {
     vscode.commands.registerCommand("customModelHttp1Proxy.configure", configureUpstream),
     vscode.commands.registerCommand("customModelHttp1Proxy.restart", restartProxy),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration(`${CONFIGURATION_SECTION}.upstreamUrl`)) {
+      if (
+        event.affectsConfiguration(`${CONFIGURATION_SECTION}.upstreamUrl`)
+        || event.affectsConfiguration(`${CONFIGURATION_SECTION}.maxProviderRetries`)
+      ) {
         loadUpstreamUrl();
         updateUi();
       }
@@ -425,7 +588,7 @@ async function activate(context) {
   if (!upstreamUrl && !context.globalState.get("configurationPromptShown", false)) {
     await context.globalState.update("configurationPromptShown", true);
     const action = await vscode.window.showWarningMessage(
-      "Custom Model HTTP/1.1 Proxy needs an upstream endpoint.",
+      "Fiello custom Model HTTP/1.1 Proxy needs an upstream endpoint.",
       "Configure",
     );
     if (action === "Configure") {

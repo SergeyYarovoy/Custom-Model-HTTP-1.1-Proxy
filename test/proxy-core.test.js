@@ -2,8 +2,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   buildUpstreamRequestOptions,
+  createSseEventObserver,
   forwardHeaders,
   normalizeUpstreamUrl,
+  providerRetryDelayMs,
+  summarizeProviderError,
 } = require("../proxy-core");
 
 test("normalizes a full HTTPS upstream endpoint", () => {
@@ -45,4 +48,49 @@ test("builds a fresh HTTP/1.1 upstream request for the configured endpoint", () 
   assert.equal(options.headers.authorization, "Bearer token");
   assert.equal(options.agent, false);
   assert.deepEqual(options.ALPNProtocols, ["http/1.1"]);
+});
+
+test("observes SSE error events across response chunk boundaries", () => {
+  const events = [];
+  const observer = createSseEventObserver((event) => events.push(event));
+
+  observer.write(Buffer.from("event: response.created\ndata: {}\n\nevent: err"));
+  observer.write(Buffer.from("or\ndata: {\"type\":\"error\",\"error\":{\"code\":\"rate_limit\"}}\n\n"));
+  observer.end();
+
+  assert.deepEqual(events, [
+    { event: "response.created", data: "{}" },
+    { event: "error", data: '{"type":"error","error":{"code":"rate_limit"}}' },
+  ]);
+});
+
+test("summarizes provider errors without retaining unrelated response data", () => {
+  const summary = summarizeProviderError(
+    JSON.stringify({
+      type: "error",
+      error: {
+        code: "rate_limit",
+        type: "requests",
+        message: "Try again later",
+        internal_details: "must not be retained",
+      },
+      response: { prompt: "must not be retained" },
+    }),
+    { "apim-request-id": "request-123" },
+  );
+
+  assert.equal(
+    summary,
+    "Provider SSE error: code=rate_limit; type=requests; message=Try again later; requestId=request-123",
+  );
+  assert.doesNotMatch(summary, /prompt|internal_details/);
+});
+
+test("uses progressive provider retry delays and honors Retry-After", () => {
+  assert.equal(providerRetryDelayMs(1), 1_000);
+  assert.equal(providerRetryDelayMs(2), 2_000);
+  assert.equal(providerRetryDelayMs(5), 15_000);
+  assert.equal(providerRetryDelayMs(30), 15_000);
+  assert.equal(providerRetryDelayMs(2, { "retry-after": "9" }), 9_000);
+  assert.equal(providerRetryDelayMs(2, { "retry-after": "120" }), 60_000);
 });

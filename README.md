@@ -1,8 +1,8 @@
-# Custom Model HTTP/1.1 Proxy
+# Fiello custom Model HTTP/1.1 Proxy
 
-Custom Model HTTP/1.1 Proxy runs a loopback proxy inside the VS Code extension
-host. It forwards custom language-model requests to one configured HTTPS
-endpoint while forcing a fresh HTTP/1.1 TLS connection for every upstream
+Fiello custom Model HTTP/1.1 Proxy runs a loopback proxy inside the VS Code
+extension host. It forwards custom language-model requests to one configured
+HTTPS endpoint while forcing a fresh HTTP/1.1 TLS connection for every upstream
 request.
 
 ## Why this proxy exists
@@ -23,7 +23,10 @@ API. The underlying VS Code behavior is tracked in
 - Starts with VS Code and stops with the extension host.
 - Listens only on `127.0.0.1:43129`.
 - Forces upstream ALPN to `http/1.1`.
-- Streams request and response bodies without buffering them.
+- Retries transient provider SSE errors with progressive delays before exposing
+  a failed response to the model client.
+- Streams responses and retains each active request body only in memory while
+  retries are possible.
 - Keeps API keys and authorization headers in the calling extension's configuration.
 - Shows status, uptime, request counts, active requests, and upstream errors in
   a VS Code webview.
@@ -34,10 +37,16 @@ API. The underlying VS Code behavior is tracked in
 
 Set the full upstream model endpoint using any of these methods:
 
-1. Click `HTTP/1.1 Proxy` in the VS Code status bar, enter the endpoint, and
+1. Click `Fiello HTTP/1.1 Proxy` in the VS Code status bar, enter the endpoint, and
    select **Save**.
-2. Run **Custom Model HTTP/1.1 Proxy: Configure Upstream** from the Command Palette.
+2. Run **Fiello custom Model HTTP/1.1 Proxy: Configure Upstream** from the
+  Command Palette.
 3. Open VS Code Settings and set `customModelHttp1Proxy.upstreamUrl`.
+
+The dashboard and VS Code Settings also expose
+`customModelHttp1Proxy.maxProviderRetries`. It accepts `0` through `30` and
+defaults to `5`. Retry delays grow from 1 second to a 15-second cap; a provider
+`Retry-After` value is honored up to 60 seconds.
 
 The endpoint must:
 
@@ -64,8 +73,8 @@ hop-by-hop headers are removed.
 
 ## Status
 
-Click `HTTP/1.1 Proxy` in the status bar or run
-**Custom Model HTTP/1.1 Proxy: Show Status**.
+Click `Fiello HTTP/1.1 Proxy` in the status bar or run
+**Fiello custom Model HTTP/1.1 Proxy: Show Status**.
 
 The status view provides:
 
@@ -86,8 +95,8 @@ http://127.0.0.1:43129/__health
 
 ### Visual Studio Marketplace
 
-After publication, install **Custom Model HTTP/1.1 Proxy** from the Extensions
-view in VS Code.
+After publication, install **Fiello custom Model HTTP/1.1 Proxy** from the
+Extensions view in VS Code.
 
 ### VSIX
 
@@ -97,7 +106,7 @@ from the Command Palette.
 The command-line equivalent is:
 
 ```bash
-code --install-extension custom-model-http1-proxy-0.2.0.vsix
+code --install-extension fiello-custom-model-http1-proxy-0.2.1.vsix
 ```
 
 ## Build
@@ -121,7 +130,8 @@ npm run package
 - The listener binds only to IPv4 loopback and is not exposed to the local network.
 - Only HTTPS upstream endpoints are accepted.
 - User information and credentials are rejected in the configured URL.
-- Request bodies and credentials are not logged or persisted.
+- Request bodies are held in memory only for the lifetime of an active request
+  and are not logged or persisted. Credentials are not logged or persisted.
 - The extension does not read custom model configuration files and does not
   store API keys.
 - Every upstream request uses a new connection with HTTP/1.1 ALPN, avoiding
@@ -149,7 +159,7 @@ Set `customModelHttp1Proxy.upstreamUrl` to the complete upstream HTTPS endpoint.
 ### `blocked`
 
 Another process owns port `43129`. Stop that process, then run
-**Custom Model HTTP/1.1 Proxy: Restart**.
+**Fiello custom Model HTTP/1.1 Proxy: Restart**.
 
 ### `502 upstream_request_failed`
 

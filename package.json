@@ -2,7 +2,7 @@
   "name": "fiello-custom-model-http1-proxy",
   "displayName": "Fiello custom Model HTTP/1.1 Proxy",
   "description": "Routes custom VS Code model requests through a local HTTP/1.1 proxy to avoid transient HTTP/2 transport failures.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "serhiiyarovyi",
   "license": "MIT",
   "repository": {
@@ -52,25 +52,33 @@
     "commands": [
       {
         "command": "customModelHttp1Proxy.showStatus",
-        "title": "Custom Model HTTP/1.1 Proxy: Show Status"
+        "title": "Fiello custom Model HTTP/1.1 Proxy: Show Status"
       },
       {
         "command": "customModelHttp1Proxy.configure",
-        "title": "Custom Model HTTP/1.1 Proxy: Configure Upstream"
+        "title": "Fiello custom Model HTTP/1.1 Proxy: Configure Upstream"
       },
       {
         "command": "customModelHttp1Proxy.restart",
-        "title": "Custom Model HTTP/1.1 Proxy: Restart"
+        "title": "Fiello custom Model HTTP/1.1 Proxy: Restart"
       }
     ],
     "configuration": {
-      "title": "Custom Model HTTP/1.1 Proxy",
+      "title": "Fiello custom Model HTTP/1.1 Proxy",
       "properties": {
         "customModelHttp1Proxy.upstreamUrl": {
           "type": "string",
           "default": "",
           "scope": "application",
           "markdownDescription": "Full HTTPS endpoint URL that receives proxied custom model requests. Credentials remain in the custom model configuration and are forwarded as request headers."
+        },
+        "customModelHttp1Proxy.maxProviderRetries": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 30,
+          "scope": "application",
+          "markdownDescription": "Maximum retries after a transient provider SSE error. Delays increase progressively and honor the provider's `Retry-After` header."
         }
       }
     }
