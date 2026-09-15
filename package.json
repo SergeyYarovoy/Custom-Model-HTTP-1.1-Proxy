@@ -1,0 +1,86 @@
+{
+  "name": "fiello-custom-model-http1-proxy",
+  "displayName": "Fiello custom Model HTTP/1.1 Proxy",
+  "description": "Routes custom VS Code model requests through a local HTTP/1.1 proxy to avoid transient HTTP/2 transport failures.",
+  "version": "0.2.0",
+  "publisher": "serhiiyarovyi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SergeyYarovoy/Custom-Model-HTTP-1.1-Proxy.git"
+  },
+  "homepage": "https://github.com/SergeyYarovoy/Custom-Model-HTTP-1.1-Proxy#readme",
+  "bugs": {
+    "url": "https://github.com/SergeyYarovoy/Custom-Model-HTTP-1.1-Proxy/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "custom model",
+    "http1",
+    "http2",
+    "proxy",
+    "language model",
+    "openai"
+  ],
+  "pricing": "Free",
+  "preview": true,
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./extension.js",
+  "files": [
+    "extension.js",
+    "proxy-core.js",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository",
+    "publish": "npx --yes @vscode/vsce publish --allow-missing-repository"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "customModelHttp1Proxy.showStatus",
+        "title": "Custom Model HTTP/1.1 Proxy: Show Status"
+      },
+      {
+        "command": "customModelHttp1Proxy.configure",
+        "title": "Custom Model HTTP/1.1 Proxy: Configure Upstream"
+      },
+      {
+        "command": "customModelHttp1Proxy.restart",
+        "title": "Custom Model HTTP/1.1 Proxy: Restart"
+      }
+    ],
+    "configuration": {
+      "title": "Custom Model HTTP/1.1 Proxy",
+      "properties": {
+        "customModelHttp1Proxy.upstreamUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Full HTTPS endpoint URL that receives proxied custom model requests. Credentials remain in the custom model configuration and are forwarded as request headers."
+        }
+      }
+    }
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": {
+      "supported": true
+    }
+  }
+}
