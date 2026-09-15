@@ -1,6 +1,6 @@
-# Fiello custom Model HTTP/1.1 Proxy
+# Fiello Model Transport Proxy
 
-Fiello custom Model HTTP/1.1 Proxy runs a loopback proxy inside the VS Code
+Fiello Model Transport Proxy runs a loopback proxy inside the VS Code
 extension host. It forwards custom language-model requests to one configured
 HTTPS endpoint while forcing a fresh HTTP/1.1 TLS connection for every upstream
 request.
@@ -37,9 +37,9 @@ API. The underlying VS Code behavior is tracked in
 
 Set the full upstream model endpoint using any of these methods:
 
-1. Click `Fiello HTTP/1.1 Proxy` in the VS Code status bar, enter the endpoint, and
+1. Click `Fiello Model Transport Proxy` in the VS Code status bar, enter the endpoint, and
    select **Save**.
-2. Run **Fiello custom Model HTTP/1.1 Proxy: Configure Upstream** from the
+2. Run **Fiello Model Transport Proxy: Configure Upstream** from the
   Command Palette.
 3. Open VS Code Settings and set `customModelHttp1Proxy.upstreamUrl`.
 
@@ -73,8 +73,8 @@ hop-by-hop headers are removed.
 
 ## Status
 
-Click `Fiello HTTP/1.1 Proxy` in the status bar or run
-**Fiello custom Model HTTP/1.1 Proxy: Show Status**.
+Click `Fiello Model Transport Proxy` in the status bar or run
+**Fiello Model Transport Proxy: Show Status**.
 
 The status view provides:
 
@@ -95,7 +95,7 @@ http://127.0.0.1:43129/__health
 
 ### Visual Studio Marketplace
 
-After publication, install **Fiello custom Model HTTP/1.1 Proxy** from the
+After publication, install **Fiello Model Transport Proxy** from the
 Extensions view in VS Code.
 
 ### VSIX
@@ -106,7 +106,7 @@ from the Command Palette.
 The command-line equivalent is:
 
 ```bash
-code --install-extension fiello-custom-model-http1-proxy-0.2.1.vsix
+code --install-extension fiello-model-transport-proxy-0.2.2.vsix
 ```
 
 ## Build
@@ -159,7 +159,7 @@ Set `customModelHttp1Proxy.upstreamUrl` to the complete upstream HTTPS endpoint.
 ### `blocked`
 
 Another process owns port `43129`. Stop that process, then run
-**Fiello custom Model HTTP/1.1 Proxy: Restart**.
+**Fiello Model Transport Proxy: Restart**.
 
 ### `502 upstream_request_failed`
 

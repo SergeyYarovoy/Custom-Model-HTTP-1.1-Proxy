@@ -365,16 +365,16 @@ async function updateUi() {
 
   const status = await getStatus();
   if (status.mode === "running" || status.mode === "shared") {
-    statusBar.text = "$(radio-tower) Fiello HTTP/1.1 Proxy";
+    statusBar.text = "$(radio-tower) Fiello Model Transport Proxy";
     statusBar.backgroundColor = undefined;
   } else if (status.mode === "starting") {
-    statusBar.text = "$(loading~spin) Fiello HTTP/1.1 Proxy";
+    statusBar.text = "$(loading~spin) Fiello Model Transport Proxy";
     statusBar.backgroundColor = undefined;
   } else {
-    statusBar.text = "$(warning) Fiello HTTP/1.1 Proxy";
+    statusBar.text = "$(warning) Fiello Model Transport Proxy";
     statusBar.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
   }
-  statusBar.tooltip = `Fiello custom Model HTTP/1.1 Proxy: ${status.mode}`;
+  statusBar.tooltip = `Fiello Model Transport Proxy: ${status.mode}`;
   statusPanel?.webview.postMessage({ type: "status", status });
 }
 
@@ -396,7 +396,7 @@ async function saveMaxProviderRetries(value) {
 
 async function configureUpstream() {
   const value = await vscode.window.showInputBox({
-    title: "Fiello custom Model HTTP/1.1 Proxy",
+    title: "Fiello Model Transport Proxy",
     prompt: "Enter the full upstream HTTPS endpoint URL",
     value: upstreamUrl?.href ?? configuration().get("upstreamUrl", ""),
     ignoreFocusOut: true,
@@ -422,7 +422,7 @@ function webviewHtml() {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-  <title>Fiello custom Model HTTP/1.1 Proxy</title>
+  <title>Fiello Model Transport Proxy</title>
   <style nonce="${nonce}">
     body { padding: 24px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
     main { max-width: 760px; margin: 0 auto; }
@@ -453,7 +453,7 @@ function webviewHtml() {
 <body>
   <main>
     <header>
-      <h1>Fiello custom Model HTTP/1.1 Proxy</h1>
+      <h1>Fiello Model Transport Proxy</h1>
       <div class="actions"><button id="settings" class="secondary" type="button">Settings</button><button id="restart" type="button">Restart</button></div>
     </header>
     <div class="summary"><span id="indicator" class="indicator"></span><strong id="mode">Starting</strong></div>
@@ -529,7 +529,7 @@ function showStatus(context) {
 
   statusPanel = vscode.window.createWebviewPanel(
     "customModelHttp1ProxyStatus",
-    "Fiello custom Model HTTP/1.1 Proxy",
+    "Fiello Model Transport Proxy",
     vscode.ViewColumn.One,
     { enableScripts: true },
   );
@@ -588,7 +588,7 @@ async function activate(context) {
   if (!upstreamUrl && !context.globalState.get("configurationPromptShown", false)) {
     await context.globalState.update("configurationPromptShown", true);
     const action = await vscode.window.showWarningMessage(
-      "Fiello custom Model HTTP/1.1 Proxy needs an upstream endpoint.",
+      "Fiello Model Transport Proxy needs an upstream endpoint.",
       "Configure",
     );
     if (action === "Configure") {

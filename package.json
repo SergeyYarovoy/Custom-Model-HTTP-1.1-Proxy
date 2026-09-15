@@ -1,8 +1,8 @@
 {
-  "name": "fiello-custom-model-http1-proxy",
-  "displayName": "Fiello custom Model HTTP/1.1 Proxy",
+  "name": "fiello-model-transport-proxy",
+  "displayName": "Fiello Model Transport Proxy",
   "description": "Routes custom VS Code model requests through a local HTTP/1.1 proxy to avoid transient HTTP/2 transport failures.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "serhiiyarovyi",
   "license": "MIT",
   "repository": {
@@ -52,19 +52,19 @@
     "commands": [
       {
         "command": "customModelHttp1Proxy.showStatus",
-        "title": "Fiello custom Model HTTP/1.1 Proxy: Show Status"
+        "title": "Fiello Model Transport Proxy: Show Status"
       },
       {
         "command": "customModelHttp1Proxy.configure",
-        "title": "Fiello custom Model HTTP/1.1 Proxy: Configure Upstream"
+        "title": "Fiello Model Transport Proxy: Configure Upstream"
       },
       {
         "command": "customModelHttp1Proxy.restart",
-        "title": "Fiello custom Model HTTP/1.1 Proxy: Restart"
+        "title": "Fiello Model Transport Proxy: Restart"
       }
     ],
     "configuration": {
-      "title": "Fiello custom Model HTTP/1.1 Proxy",
+      "title": "Fiello Model Transport Proxy",
       "properties": {
         "customModelHttp1Proxy.upstreamUrl": {
           "type": "string",
